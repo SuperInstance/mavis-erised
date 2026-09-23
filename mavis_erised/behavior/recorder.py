@@ -70,6 +70,8 @@ def zero_shot_success_rate(profiles: List[BehaviorProfile]) -> float:
 
 def stumble_patterns(profiles: List[BehaviorProfile]) -> List[Dict]:
     """Where do agents stumble? (reach for the wrong command repeatedly)"""
+    from ..play import find_useful_commands
+
     # Group by (task, first_command)
     groups = defaultdict(list)
     for p in profiles:
@@ -83,21 +85,27 @@ def stumble_patterns(profiles: List[BehaviorProfile]) -> List[Dict]:
         if len(group) >= 2:
             first_try_failures = sum(1 for p in group if not p.reach_sequence[0].success)
             if first_try_failures > len(group) / 2:
-                # Multiple agents tried this first command and most failed
-                # Look at what they tried next (the right command)
-                follow_ups = Counter()
+                # The "right answer" is the useful command for this task
+                # (NOT just the first successful command — that's often 'help')
+                useful = find_useful_commands(task, [])
+                right_answer = useful[0] if useful else "unknown"
+
+                # Track what they actually ended up using
+                actual_success = Counter()
                 for p in group:
-                    if len(p.reach_sequence) > 1 and p.final_success:
-                        follow_ups[p.reach_sequence[1].command] += 1
+                    for r in p.reach_sequence:
+                        if r.success and r.command != first_cmd:
+                            actual_success[r.command] += 1
+
                 stumbles.append({
                     "task": task,
                     "first_command": first_cmd,
                     "agent_count": len(group),
                     "first_try_failure_count": first_try_failures,
-                    "success_after": dict(follow_ups.most_common(3)),
+                    "right_answer": right_answer,
+                    "agents_eventually_used": dict(actual_success.most_common(3)),
                     "yoke_move": (
-                        f"Move '{follow_ups.most_common(1)[0][0]}' to position of '{first_cmd}'"
-                        if follow_ups else f"Rename or remove '{first_cmd}'"
+                        f"Add '{first_cmd}' as alias for '{right_answer}' — {first_try_failures}/{len(group)} agents reached for '{first_cmd}' instead of '{right_answer}'"
                     ),
                 })
 

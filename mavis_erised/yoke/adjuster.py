@@ -73,15 +73,21 @@ def propose_auto_translate(command: str, evidence_count: int) -> YokeMove:
 def analyze_stumbles(stumbles: List[Dict]) -> List[YokeMove]:
     """Convert stumble observations into yoke moves."""
     moves = []
+    seen = set()
     for s in stumbles:
         # If agents reach for X but should reach for Y, propose alias
-        if s.get("success_after"):
-            right_command = list(s["success_after"].keys())[0]
-            moves.append(propose_alias(
-                target=right_command,
-                agent_command=s["first_command"],
-                evidence_count=s["agent_count"],
-            ))
+        right = s.get("right_answer") or (
+            list(s["success_after"].keys())[0] if s.get("success_after") else None
+        )
+        if right and right != s["first_command"]:
+            key = (s["first_command"], right)
+            if key not in seen:
+                seen.add(key)
+                moves.append(propose_alias(
+                    target=right,
+                    agent_command=s["first_command"],
+                    evidence_count=s["agent_count"],
+                ))
     return moves
 
 

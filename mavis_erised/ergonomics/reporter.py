@@ -114,9 +114,12 @@ def format_report_text(report: Dict) -> str:
             lines.append(f"  - Task: {s['task']}")
             count = s.get('first_try_failure_count', s.get('failure_count', 0))
             lines.append(f"    Agents reached: '{s['first_command']}' ({s['agent_count']} agents, {count} failed)")
-            if s.get("success_after"):
-                lines.append(f"    Right answer: {list(s['success_after'].keys())[0]}")
-                lines.append(f"    Yoke move: {s['yoke_move']}")
+            ra = s.get("right_answer") or (
+                list(s.get("agents_eventually_used", {}).keys())[0]
+                if s.get("agents_eventually_used") else "?"
+            )
+            lines.append(f"    Right answer: {ra}")
+            lines.append(f"    Yoke move: {s['yoke_move']}")
         lines.append("")
         lines.append("")
 

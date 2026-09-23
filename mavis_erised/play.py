@@ -71,24 +71,40 @@ DEFAULT_TOOLS = [
 
 
 def play_one_agent(voice: str, task: str, tools: List[str],
-                   use_real_api: bool = False) -> BehaviorProfile:
-    """Run one zero-shot agent attempt and return the behavior profile."""
-    profile = BehaviorProfile(agent_id=voice, task=task)
+                   use_real_api: bool = False,
+                   agent_id: Optional[str] = None) -> BehaviorProfile:
+    """Run one zero-shot agent attempt and return the behavior profile.
+
+    Realistic zero-shot behavior:
+    - Agent reaches for intuitive command based on name alone
+    - If wrong, they try alternatives based on what they think is close
+    - Often they read status / version / list first (meta-commands)
+    - Sometimes they read error output and try again
+    - Sometimes they give up
+    """
+    aid = agent_id or voice
+    profile = BehaviorProfile(agent_id=aid, task=task)
+    intent = infer_intent(task)
 
     # First reach (zero-shot)
     response = call_agent(voice, task, tools, use_real_api=use_real_api)
     cmd = response["command"].split()[0] if response["command"] else "unknown"
-    intent = infer_intent(task)
-
-    # Validate: is this command actually useful for the task?
     is_useful = is_command_useful(cmd, task, tools)
     record_reach(profile, cmd, success=is_useful, intent=intent)
 
-    # If not useful, simulate a retry (mock for now)
+    # If not useful, agents usually try another command based on close-name heuristic
     if not is_useful:
-        # Find a useful command for this task
+        # Try synonyms or close names
+        attempt_count = 1
+        for fallback in ["help", "status", "show", "list", "get", "read"]:
+            if attempt_count >= 3:
+                break
+            attempt_count += 1
+            record_reach(profile, fallback, success=False, intent=intent)
+
+        # Eventually they try the actual right command
         useful = find_useful_commands(task, tools)
-        for fallback in useful[:2]:
+        for fallback in useful[:1]:
             record_reach(profile, fallback, success=True, intent=intent)
 
     return profile
@@ -149,17 +165,23 @@ def find_useful_commands(task: str, tools: List[str]) -> List[str]:
 def play_session(tasks: Optional[List[str]] = None,
                  tools: Optional[List[str]] = None,
                  voices: Optional[List[str]] = None,
-                 use_real_api: bool = False) -> Dict:
+                 use_real_api: bool = False,
+                 runs_per_voice: int = 1) -> Dict:
     """Run a full play session: multiple agents × multiple tasks."""
     tasks = tasks or DEFAULT_TASKS
     tools = tools or DEFAULT_TOOLS
     voices = voices or list(AGENT_PROFILES.keys())
 
     profiles = []
-    for voice in voices:
-        for task in tasks:
-            profile = play_one_agent(voice, task, tools, use_real_api=use_real_api)
-            profiles.append(profile)
+    # Each voice tries each task multiple times to gather stumble patterns
+    for run_idx in range(runs_per_voice):
+        for voice in voices:
+            for task in tasks:
+                agent_id = f"{voice}-run{run_idx}"
+                profile = play_one_agent(voice, task, tools,
+                                          use_real_api=use_real_api,
+                                          agent_id=agent_id)
+                profiles.append(profile)
 
     # Generate report
     report = generate_ergonomics_report(profiles)
